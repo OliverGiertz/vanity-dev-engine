@@ -9,7 +9,7 @@ Use from another repository:
 ```yaml
 jobs:
   use-vanity-dev-engine:
-    uses: OliverGiertz/vanity-dev-engine/.github/workflows/repo-pipeline.yml@v1.1
+    uses: OliverGiertz/vanity-dev-engine/.github/workflows/repo-pipeline.yml@v1.2
     secrets: inherit
     with:
       repo_type: ios
