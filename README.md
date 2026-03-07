@@ -9,12 +9,15 @@ Use from another repository:
 ```yaml
 jobs:
   use-vanity-dev-engine:
-    uses: OliverGiertz/vanity-dev-engine/.github/workflows/repo-pipeline.yml@v1
+    uses: OliverGiertz/vanity-dev-engine/.github/workflows/repo-pipeline.yml@v1.1
     secrets: inherit
+    with:
+      repo_type: ios
 ```
 
 Optional inputs:
 
+- `repo_type` (`ios`, `node`, `python`, `custom`)
 - `lint_command`
 - `build_command`
 - `test_command`

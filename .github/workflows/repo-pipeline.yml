@@ -3,57 +3,148 @@ name: repo-pipeline
 on:
   workflow_call:
     inputs:
+      repo_type:
+        description: Repository type (ios, node, python, custom)
+        required: false
+        type: string
+        default: ios
       lint_command:
         description: Command that runs lint checks
         required: false
         type: string
-        default: |
-          if which swiftlint > /dev/null; then
-            swiftlint --strict
-          else
-            brew install swiftlint
-            swiftlint --strict
-          fi
+        default: ""
       build_command:
         description: Command that builds the project
         required: false
         type: string
-        default: |
-          xcodebuild build \
-            -project CamperLogBook.xcodeproj \
-            -scheme CamperLogBook \
-            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
-            CODE_SIGNING_ALLOWED=NO
+        default: ""
       test_command:
         description: Command that executes tests
         required: false
         type: string
-        default: |
-          xcodebuild test \
-            -project CamperLogBook.xcodeproj \
-            -scheme CamperLogBook \
-            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
-            CODE_SIGNING_ALLOWED=NO
+        default: ""
 
 jobs:
-  ci:
+  ci-ios:
     name: ci
+    if: ${{ inputs.repo_type == 'ios' }}
     runs-on: macos-15
     steps:
       - name: Checkout caller repository
         uses: actions/checkout@v4
 
+      - name: Resolve commands
+        id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          lint="${{ inputs.lint_command }}"
+          build="${{ inputs.build_command }}"
+          test="${{ inputs.test_command }}"
+          if [ -z "$lint" ]; then
+            lint="if which swiftlint > /dev/null; then swiftlint --strict; else brew install swiftlint && swiftlint --strict; fi"
+          fi
+          if [ -z "$build" ]; then
+            build="xcodebuild build -project CamperLogBook.xcodeproj -scheme CamperLogBook -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' CODE_SIGNING_ALLOWED=NO"
+          fi
+          if [ -z "$test" ]; then
+            test="xcodebuild test -project CamperLogBook.xcodeproj -scheme CamperLogBook -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' CODE_SIGNING_ALLOWED=NO"
+          fi
+          {
+            echo "lint<<EOF"
+            echo "$lint"
+            echo "EOF"
+            echo "build<<EOF"
+            echo "$build"
+            echo "EOF"
+            echo "test<<EOF"
+            echo "$test"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Lint
         shell: bash
-        run: ${{ inputs.lint_command }}
+        run: ${{ steps.resolve.outputs.lint }}
 
       - name: Build
         shell: bash
-        run: ${{ inputs.build_command }}
+        run: ${{ steps.resolve.outputs.build }}
 
       - name: Test
         shell: bash
-        run: ${{ inputs.test_command }}
+        run: ${{ steps.resolve.outputs.test }}
+
+  ci-generic:
+    name: ci
+    if: ${{ inputs.repo_type != 'ios' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@v4
+
+      - name: Resolve commands
+        id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo_type="${{ inputs.repo_type }}"
+          lint="${{ inputs.lint_command }}"
+          build="${{ inputs.build_command }}"
+          test="${{ inputs.test_command }}"
+
+          if [ -z "$lint" ]; then
+            case "$repo_type" in
+              node) lint="npm run lint --if-present" ;;
+              python) lint="python -m pip install -U pip && pip install ruff && ruff check ." ;;
+              custom) lint="" ;;
+              *) lint="" ;;
+            esac
+          fi
+
+          if [ -z "$build" ]; then
+            case "$repo_type" in
+              node) build="npm run build --if-present" ;;
+              python) build="" ;;
+              custom) build="" ;;
+              *) build="" ;;
+            esac
+          fi
+
+          if [ -z "$test" ]; then
+            case "$repo_type" in
+              node) test="npm test --if-present" ;;
+              python) test="pytest -q" ;;
+              custom) test="" ;;
+              *) test="" ;;
+            esac
+          fi
+
+          {
+            echo "lint<<EOF"
+            echo "$lint"
+            echo "EOF"
+            echo "build<<EOF"
+            echo "$build"
+            echo "EOF"
+            echo "test<<EOF"
+            echo "$test"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Lint
+        if: ${{ steps.resolve.outputs.lint != '' }}
+        shell: bash
+        run: ${{ steps.resolve.outputs.lint }}
+
+      - name: Build
+        if: ${{ steps.resolve.outputs.build != '' }}
+        shell: bash
+        run: ${{ steps.resolve.outputs.build }}
+
+      - name: Test
+        if: ${{ steps.resolve.outputs.test != '' }}
+        shell: bash
+        run: ${{ steps.resolve.outputs.test }}
 
   security-scan:
     name: security-scan
