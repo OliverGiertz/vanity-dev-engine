@@ -9,7 +9,7 @@ Use from another repository:
 ```yaml
 jobs:
   use-vanity-dev-engine:
-    uses: OliverGiertz/vanity-dev-engine/.github/workflows/repo-pipeline.yml@v1.4
+    uses: OliverGiertz/vanity-dev-engine/.github/workflows/repo-pipeline.yml@v1.5
     with:
       repo_type: ios
       xcode_project: CamperLogBook.xcodeproj
@@ -34,3 +34,5 @@ jobs:
 ## Consumer toggle
 
 Set repository variable `USE_VANITY_DEV_ENGINE=true` in consumer repos to activate central execution.
+
+Note: The default CI runner is `ubuntu-latest`. For iOS repositories, provide explicit `build_command` and `test_command` overrides (or use Xcode Cloud for build/test).

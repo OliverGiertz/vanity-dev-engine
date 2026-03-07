@@ -37,7 +37,7 @@ on:
 jobs:
   ci:
     name: ci
-    runs-on: macos-15
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout caller repository
         uses: actions/checkout@v4
@@ -57,7 +57,7 @@ jobs:
           if [ -z "$lint" ]; then
             case "$repo_type" in
               ios)
-                lint="if which swiftlint > /dev/null; then swiftlint --strict; else brew install swiftlint && swiftlint --strict; fi"
+                lint="echo 'No default ios lint command on ubuntu runner. Set lint_command override if needed.'"
                 ;;
               node)
                 lint="npm run lint --if-present"
@@ -74,7 +74,7 @@ jobs:
           if [ -z "$build" ]; then
             case "$repo_type" in
               ios)
-                build="xcodebuild build -project $xcode_project -scheme $xcode_scheme -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' CODE_SIGNING_ALLOWED=NO"
+                build="echo 'No default ios build command on ubuntu runner. Use Xcode Cloud or set build_command override.'"
                 ;;
               node)
                 build="npm run build --if-present"
@@ -91,7 +91,7 @@ jobs:
           if [ -z "$test" ]; then
             case "$repo_type" in
               ios)
-                test="xcodebuild test -project $xcode_project -scheme $xcode_scheme -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' CODE_SIGNING_ALLOWED=NO"
+                test="echo 'No default ios test command on ubuntu runner. Use Xcode Cloud or set test_command override.'"
                 ;;
               node)
                 test="npm test --if-present"
