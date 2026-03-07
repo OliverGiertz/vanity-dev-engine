@@ -4,26 +4,241 @@ on:
   workflow_call:
     inputs:
       repo_type:
-        description: Repository type
+        description: Repository type (ios, node, python, custom)
         required: false
         type: string
         default: ios
+      xcode_project:
+        description: Xcode project path for ios repos
+        required: false
+        type: string
+        default: CamperLogBook.xcodeproj
+      xcode_scheme:
+        description: Xcode scheme for ios repos
+        required: false
+        type: string
+        default: CamperLogBook
+      lint_command:
+        description: Optional lint command override
+        required: false
+        type: string
+        default: ""
+      build_command:
+        description: Optional build command override
+        required: false
+        type: string
+        default: ""
+      test_command:
+        description: Optional test command override
+        required: false
+        type: string
+        default: ""
 
 jobs:
   ci:
     name: ci
-    runs-on: ubuntu-latest
+    runs-on: macos-15
     steps:
-      - run: echo "ci ok for ${{ inputs.repo_type }}"
+      - name: Checkout caller repository
+        uses: actions/checkout@v4
+
+      - name: Resolve commands
+        id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo_type='${{ inputs.repo_type }}'
+          lint='${{ inputs.lint_command }}'
+          build='${{ inputs.build_command }}'
+          test='${{ inputs.test_command }}'
+          xcode_project='${{ inputs.xcode_project }}'
+          xcode_scheme='${{ inputs.xcode_scheme }}'
+
+          if [ -z "$lint" ]; then
+            case "$repo_type" in
+              ios)
+                lint="if which swiftlint > /dev/null; then swiftlint --strict; else brew install swiftlint && swiftlint --strict; fi"
+                ;;
+              node)
+                lint="npm run lint --if-present"
+                ;;
+              python)
+                lint="python3 -m pip install -U pip && python3 -m pip install ruff && ruff check ."
+                ;;
+              *)
+                lint="echo 'No lint default for repo_type=$repo_type'"
+                ;;
+            esac
+          fi
+
+          if [ -z "$build" ]; then
+            case "$repo_type" in
+              ios)
+                build="xcodebuild build -project $xcode_project -scheme $xcode_scheme -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' CODE_SIGNING_ALLOWED=NO"
+                ;;
+              node)
+                build="npm run build --if-present"
+                ;;
+              python)
+                build="echo 'No default build step for python'"
+                ;;
+              *)
+                build="echo 'No build default for repo_type=$repo_type'"
+                ;;
+            esac
+          fi
+
+          if [ -z "$test" ]; then
+            case "$repo_type" in
+              ios)
+                test="xcodebuild test -project $xcode_project -scheme $xcode_scheme -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' CODE_SIGNING_ALLOWED=NO"
+                ;;
+              node)
+                test="npm test --if-present"
+                ;;
+              python)
+                test="pytest -q"
+                ;;
+              *)
+                test="echo 'No test default for repo_type=$repo_type'"
+                ;;
+            esac
+          fi
+
+          {
+            echo "lint=$lint"
+            echo "build=$build"
+            echo "test=$test"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Lint
+        shell: bash
+        run: |
+          set -euo pipefail
+          eval "${{ steps.resolve.outputs.lint }}"
+
+      - name: Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          eval "${{ steps.resolve.outputs.build }}"
+
+      - name: Test
+        shell: bash
+        run: |
+          set -euo pipefail
+          eval "${{ steps.resolve.outputs.test }}"
 
   security-scan:
     name: security-scan
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      pull-requests: read
     steps:
-      - run: echo "security-scan ok"
+      - name: Checkout caller repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install gitleaks
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sSL https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks_linux_x64.tar.gz | tar -xz
+          sudo mv gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      - name: Gitleaks scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          gitleaks detect --source . --no-git --verbose
+
+      - name: Install Semgrep
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --upgrade pip
+          python3 -m pip install semgrep
+          semgrep --version
+
+      - name: Semgrep scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          semgrep --config p/default --error
+
+      - name: Dependency Review
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: actions/dependency-review-action@v4
 
   ai-review:
     name: ai-review
+    if: ${{ github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
     steps:
-      - run: echo "ai-review ok"
+      - name: Validate ChatGPT and Claude review status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const pull_number = context.payload.pull_request
+              ? context.payload.pull_request.number
+              : context.payload.issue?.number;
+
+            if (!pull_number) {
+              core.setFailed("No pull request context found for ai-review validation.");
+              return;
+            }
+
+            const pr = await github.rest.pulls.get({ owner, repo, pull_number });
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number: pull_number,
+              per_page: 100
+            });
+
+            const bodyParts = [pr.data.body || "", ...comments.map(c => c.body || "")];
+            const allText = bodyParts.join("\n\n").toLowerCase();
+
+            const hasSection = (name) => allText.includes(`### ${name}`.toLowerCase());
+            const hasPass = (name) => {
+              const regex = new RegExp(`###\\s*${name}[\\s\\S]*?dod status\\s*:\\s*pass`, "i");
+              return bodyParts.some(part => regex.test(part || ""));
+            };
+            const hasZeroBlocker = (name) => {
+              const regex = new RegExp(`###\\s*${name}[\\s\\S]*?blocker\\s*:\\s*0`, "i");
+              return bodyParts.some(part => regex.test(part || ""));
+            };
+            const hasZeroMajor = (name) => {
+              const regex = new RegExp(`###\\s*${name}[\\s\\S]*?major\\s*:\\s*0`, "i");
+              return bodyParts.some(part => regex.test(part || ""));
+            };
+
+            const checks = [
+              { name: "ChatGPT", section: hasSection("ChatGPT"), pass: hasPass("ChatGPT"), blocker: hasZeroBlocker("ChatGPT"), major: hasZeroMajor("ChatGPT") },
+              { name: "Claude", section: hasSection("Claude"), pass: hasPass("Claude"), blocker: hasZeroBlocker("Claude"), major: hasZeroMajor("Claude") }
+            ];
+
+            const failures = checks.flatMap(c => {
+              const missing = [];
+              if (!c.section) missing.push("missing section");
+              if (!c.pass) missing.push("missing `DoD status: PASS`");
+              if (!c.blocker) missing.push("missing `Blocker: 0`");
+              if (!c.major) missing.push("missing `Major: 0`");
+              return missing.length ? [`${c.name}: ${missing.join(", ")}`] : [];
+            });
+
+            if (failures.length) {
+              core.setFailed(`AI review gate failed:\n- ${failures.join("\n- ")}`);
+            } else {
+              core.info("AI review gate passed.");
+            }

@@ -9,19 +9,28 @@ Use from another repository:
 ```yaml
 jobs:
   use-vanity-dev-engine:
-    uses: OliverGiertz/vanity-dev-engine/.github/workflows/repo-pipeline.yml@v1.2
-    secrets: inherit
+    uses: OliverGiertz/vanity-dev-engine/.github/workflows/repo-pipeline.yml@v1.4
     with:
       repo_type: ios
+      xcode_project: CamperLogBook.xcodeproj
+      xcode_scheme: CamperLogBook
 ```
 
-Optional inputs:
+## Inputs
 
-- `repo_type` (`ios`, `node`, `python`, `custom`)
-- `lint_command`
-- `build_command`
-- `test_command`
+- `repo_type`: `ios`, `node`, `python`, `custom`
+- `xcode_project`: Xcode project path for iOS repos
+- `xcode_scheme`: Xcode scheme for iOS repos
+- `lint_command`: optional override
+- `build_command`: optional override
+- `test_command`: optional override
 
-Optional control:
+## Produced checks
 
-- set repository variable `USE_VANITY_DEV_ENGINE=true` in consumer repos.
+- `use-vanity-dev-engine / ci`
+- `use-vanity-dev-engine / security-scan`
+- `use-vanity-dev-engine / ai-review`
+
+## Consumer toggle
+
+Set repository variable `USE_VANITY_DEV_ENGINE=true` in consumer repos to activate central execution.
